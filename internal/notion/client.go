@@ -1,6 +1,7 @@
 package notion
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,37 +23,51 @@ func NewNotionClient(token string, httpClient *http.Client) *NotionClient {
 	}
 }
 
-type DatabaseResponse struct {
-	Object string `json:"object"`
-	ID     string `json:"id"`
-}
 
-func (n *NotionClient) GetDatabase(ctx context.Context, databaseID string) (*DatabaseResponse, error) {
-	url := fmt.Sprintf("%sdatabases/%s", notionBaseURL, databaseID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *NotionClient) GetToDos(
+	ctx context.Context,
+	databaseID string,
+	filter any, 
+) ([]Todo, error) {
+	reqBody := map[string]any{}
+	if filter != nil {
+		reqBody["filter"] = filter
+	}
+	b, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("marshal filter: %w", err)
 	}
 
-	req.Header.Set("Notion-Version", "2022-06-28")
-	req.Header.Set("Authorization", "Bearer "+n.Token)
+	url := fmt.Sprintf("%sdata_sources/%s/query", notionBaseURL, databaseID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Notion-Version", "2022-06-28") 
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := n.HTTP.Do(req)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("notion API error (%d): %s", resp.StatusCode, string(b))
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("notion query failed: %s – %s", resp.Status, string(body))
 	}
 
-	var db DatabaseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&db); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+	var dbResp DatabaseQueryResponse
+	if decode_err := json.NewDecoder(resp.Body).Decode(&dbResp); decode_err != nil {
+		return nil, fmt.Errorf("decode: %w", decode_err)
 	}
-	return &db, nil
+
+	todos, err := MapNotionToTodos(dbResp)
+	if err != nil {
+		return nil, fmt.Errorf("map: %w", err)
+	}
+
+	return todos, nil
 }

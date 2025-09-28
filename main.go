@@ -4,8 +4,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"telenotion/api"
+	"telenotion/internal/notion"
 	"telenotion/internal/telegram"
 	"telenotion/internal/utils"
 )
@@ -28,10 +30,17 @@ func main() {
 	if dbID == "" {
 		log.Fatal("NOTION_DB_ID not set")
 	}
+	hp := &http.Client{
+		Timeout: 30 * time.Second,
+	}
 
-	tg := telegram.NewTelegramClient(tgToken, nil)
+	tg := telegram.NewTelegramClient(tgToken, hp)
+	nt := notion.NewNotionClient(ntToken, hp)
 
-	http.Handle("/telegram", api.TelegramHandler(tg))
+        nC := notion.NewService(nt)	
+	
+	tC := telegram.NewCommands(tg, nC, dbID)
+	http.Handle("/telegram", api.TelegramHandler(tC))
 
 	log.Println("Listening on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {

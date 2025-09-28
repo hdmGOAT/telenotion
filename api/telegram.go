@@ -1,14 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
-	"log"
 	"net/http"
+	"time"
 
 	"telenotion/internal/telegram"
 )
 
-func TelegramHandler(tg *telegram.TelegramClient) http.Handler {
+func TelegramHandler(cmd *telegram.Commands) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -18,13 +19,12 @@ func TelegramHandler(tg *telegram.TelegramClient) http.Handler {
 			return
 		}
 
-		if u.Message != nil {
-			log.Printf("Received: %q", u.Message.Text)
-			if err := tg.SendMessage(r.Context(), u.Message.Chat.ID,
-				"You said: "+u.Message.Text); err != nil {
-				log.Println("telegram send error:", err)
-			}
-		}
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		go func() {
+			defer cancel()
+			cmd.HandleCommands(ctx, u)
+		}()
+
 		w.WriteHeader(http.StatusOK)
 	})
 }
